@@ -161,16 +161,6 @@ export default function Settings() {
               </Text>
             </View>
 
-            <View style={{ marginTop: spacing.md, width: '100%' }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 11, letterSpacing: 1, textAlign: 'center', marginBottom: 8, textTransform: 'uppercase' }}>
-                Technology
-              </Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', lineHeight: 18 }}>
-                BLE optical sensor · Beer-Lambert Law{'\n'}
-                A = ε · l · c · · · A = log₁₀(I₀/I)
-              </Text>
-            </View>
-
             <TouchableOpacity
               onPress={() => setAboutVisible(false)}
               style={{

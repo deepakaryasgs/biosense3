@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Dimensions, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../src/ThemeContext';
@@ -7,7 +7,7 @@ import { useStore, CalibrationProfile } from '../../src/store';
 import { Card, Label, Title, Sub, Badge } from '../../src/components';
 import { Chart } from '../../src/Chart';
 import { spacing, radius } from '../../src/theme';
-import { linearRegression, polynomialRegression, manualLinear } from '../../src/regression';
+import { linearRegression, polynomialRegression } from '../../src/regression';
 
 interface StandardRow {
   concentration: string;
@@ -29,17 +29,15 @@ export default function Calibrate() {
   const [contaminant, setContaminant] = useState('');
   // Change #3: default unit mg/l (lowercase)
   const [unit, setUnit] = useState('mg/l');
-  const [modelType, setModelType] = useState<'linear' | 'polynomial' | 'manual'>('linear');
+  const [modelType, setModelType] = useState<'linear' | 'polynomial'>('linear');
   const [degree, setDegree] = useState(2);
-  const [manualSlope, setManualSlope] = useState('1');
-  const [manualIntercept, setManualIntercept] = useState('0');
   const [rows, setRows] = useState<StandardRow[]>(DEFAULT_ROWS);
   const [deleteTarget, setDeleteTarget] = useState<CalibrationProfile | null>(null);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   // Change #9: When switching model type, reset rows to default so previous points don't bleed into new graph
-  const handleModelTypeChange = (m: 'linear' | 'polynomial' | 'manual') => {
+  const handleModelTypeChange = (m: 'linear' | 'polynomial') => {
     setModelType(m);
-    // Clear points from previous calibration type so the graph is clean
     setRows(DEFAULT_ROWS);
   };
 
@@ -52,16 +50,17 @@ export default function Calibrate() {
   );
 
   const regression = useMemo(() => {
-    if (modelType === 'manual') return manualLinear(Number(manualSlope) || 0, Number(manualIntercept) || 0);
     if (modelType === 'linear') return linearRegression(points);
     return polynomialRegression(points, degree);
-  }, [modelType, points, degree, manualSlope, manualIntercept]);
+  }, [modelType, points, degree]);
 
   const screenW = Dimensions.get('window').width - spacing.md * 2 - spacing.lg * 2;
 
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const save = async () => {
     if (!name.trim()) {
-      Alert.alert('Missing info', 'Please name this calibration.');
+      setErrorMsg('Please name this calibration profile before saving.');
       return;
     }
     const c: CalibrationProfile = {
@@ -78,7 +77,7 @@ export default function Calibrate() {
       createdAt: new Date().toISOString(),
     };
     await addCalibration(c);
-    Alert.alert('Saved', `Calibration "${c.name}" saved.`);
+    setSaveMsg(c.name);
     setName('');
   };
 
@@ -155,20 +154,8 @@ export default function Calibrate() {
             </View>
           )}
 
-          {modelType === 'manual' && (
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: spacing.sm }}>
-              <Input testID="manual-slope" value={manualSlope} onChangeText={setManualSlope} placeholder="Slope" keyboardType="numeric" />
-              <Input
-                testID="manual-intercept"
-                value={manualIntercept}
-                onChangeText={setManualIntercept}
-                placeholder="Intercept"
-                keyboardType="numeric"
-              />
-            </View>
-          )}
 
-          {modelType !== 'manual' && (
+          {(
             <View style={{ marginTop: spacing.md }}>
               <Label>Standards</Label>
               <View style={{ flexDirection: 'row', marginTop: 6 }}>
@@ -327,7 +314,57 @@ export default function Calibrate() {
         })}
       </ScrollView>
 
-      {/* Change #10: Styled delete confirmation modal */}
+      {/* Change #9: Styled error modal */}
+      <Modal visible={!!errorMsg} transparent animationType="fade" onRequestClose={() => setErrorMsg(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg }}>
+          <View style={{
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 16,
+            padding: spacing.lg,
+            width: '100%',
+            maxWidth: 340,
+          }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 17, marginBottom: 8 }}>Required</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: spacing.lg }}>{errorMsg}</Text>
+            <TouchableOpacity
+              onPress={() => setErrorMsg(null)}
+              style={{ paddingVertical: 12, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Change #9: Styled save confirmation modal */}
+      <Modal visible={!!saveMsg} transparent animationType="fade" onRequestClose={() => setSaveMsg(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg }}>
+          <View style={{
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 16,
+            padding: spacing.lg,
+            width: '100%',
+            maxWidth: 340,
+          }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 17, marginBottom: 8 }}>Saved</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: spacing.lg }}>
+              Calibration "{saveMsg}" saved successfully.
+            </Text>
+            <TouchableOpacity
+              onPress={() => setSaveMsg(null)}
+              style={{ paddingVertical: 12, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Styled delete confirmation modal */}
       <Modal
         visible={!!deleteTarget}
         transparent

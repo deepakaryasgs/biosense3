@@ -7,14 +7,22 @@ import { useTheme } from '../../src/ThemeContext';
 function AppHeader({ subtitle }: { subtitle: string }) {
   const { colors } = useTheme();
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 2 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <MaterialCommunityIcons name="water-opacity" size={18} color={colors.primary} />
-        <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: -0.3 }}>
+    <View style={{ justifyContent: 'center', paddingVertical: 4, paddingLeft: 2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <MaterialCommunityIcons name="water-opacity" size={30} color={colors.primary} />
+        <Text style={{ color: colors.textPrimary, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 }}>
           Aqua<Text style={{ color: colors.primary }}>Spec</Text>
         </Text>
       </View>
-      <Text style={{ color: colors.textSecondary, fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 1 }}>
+      <Text style={{
+        color: colors.textSecondary,
+        fontSize: 12,
+        letterSpacing: 2.5,
+        textTransform: 'uppercase',
+        marginTop: 4,
+        marginLeft: 38,
+        fontWeight: '600',
+      }}>
         {subtitle}
       </Text>
     </View>
@@ -26,9 +34,10 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: colors.background },
+        headerStyle: { backgroundColor: colors.background, height: 90 },
         headerTintColor: colors.textPrimary,
-        headerTitleStyle: { fontWeight: '600', letterSpacing: 0.3 },
+        headerTitleStyle: { fontWeight: '600' },
+        headerTitleContainerStyle: { paddingLeft: 8 },
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,

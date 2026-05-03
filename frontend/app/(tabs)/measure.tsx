@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../src/ThemeContext';
@@ -23,6 +23,7 @@ export default function Measure() {
   const [contaminant, setContaminant] = useState('');
   const [notes, setNotes] = useState('');
   const [blankI0, setBlankI0] = useState(String(settings.blankIntensity));
+  const [modalMsg, setModalMsg] = useState<{ title: string; body: string; onView?: () => void } | null>(null);
   const samplesRef = useRef<Sample[]>([]);
 
   const activeCal = calibrations.find((c) => c.id === activeCalibrationId) || null;
@@ -62,16 +63,26 @@ export default function Measure() {
 
   const status = threshold(concFromCal, settings.safeMax, settings.warningMax);
 
+  // Change #3: detect BLE disconnect while in use
+  useEffect(() => {
+    const unsub = bleService.onDisconnect?.(() => {
+      setRunning(false);
+      setPaused(false);
+      setLedOn(false);
+      setModalMsg({ title: 'Device Disconnected', body: 'The BLE device was disconnected. Please reconnect to continue.' });
+    });
+    return () => unsub?.();
+  }, []);
+
   // Change #11: BLE only — no demo mode
   const handleStart = () => {
     if (!bleService.getConnected()) {
-      Alert.alert('Not connected', 'Connect a BLE device first to start measuring.');
+      setModalMsg({ title: 'Not Connected', body: 'Connect a BLE device first to start measuring.' });
       return;
     }
     samplesRef.current = [];
     setSamples([]);
     bleService.setBlank(Number(blankI0) || 1000);
-    // Change #4: Turn LED on when experiment starts
     setLedOn(true);
     bleService.setLedOn(true).catch(() => {});
     bleService.setWavelength(wavelength).catch(() => {});
@@ -121,11 +132,11 @@ export default function Measure() {
       points: pts.map((p) => ({ t: p.t, intensity: p.intensity, absorbance: p.absorbance })),
     };
     await addMeasurement(meas);
-    // Change #10: Styled inline confirmation instead of Alert
-    Alert.alert('Saved', 'Measurement stored in history.', [
-      { text: 'View', onPress: () => router.push(`/measurement/${meas.id}`) },
-      { text: 'OK' },
-    ]);
+    setModalMsg({
+      title: 'Saved',
+      body: 'Measurement stored in history.',
+      onView: () => router.push(`/measurement/${meas.id}`),
+    });
   };
 
   const screenW = Dimensions.get('window').width - spacing.md * 2 - spacing.lg * 2;
@@ -165,26 +176,31 @@ export default function Measure() {
             />
           </View>
 
-          {/* Change #8: Concentration on top (large), then Absorbance (OD), then Intensity */}
-          <View style={{ marginTop: spacing.md }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 11, letterSpacing: 1.5 }}>CONCENTRATION</Text>
-            <Text
-              testID="live-concentration"
-              style={{
-                color: colors.textPrimary,
-                fontSize: 52,
-                fontFamily: 'monospace',
-                fontVariant: ['tabular-nums'],
-                fontWeight: '600',
-                letterSpacing: -1,
-              }}
-            >
-              {concFromCal != null ? concFromCal.toFixed(2) : '—'}
-            </Text>
-            {/* Change #3: mg/L → mg/l */}
-            <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
-              {concFromCal != null ? settings.unit.replace('mg/L', 'mg/l').replace('MG/L', 'mg/l') : 'No calibration active'}
-            </Text>
+          {/* Change #7: unit inline beside number */}
+          <View style={{ marginTop: spacing.md, flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <View>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, letterSpacing: 1.5 }}>CONCENTRATION</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+                <Text
+                  testID="live-concentration"
+                  style={{
+                    color: colors.textPrimary,
+                    fontSize: 52,
+                    fontFamily: 'monospace',
+                    fontVariant: ['tabular-nums'],
+                    fontWeight: '600',
+                    letterSpacing: -1,
+                  }}
+                >
+                  {concFromCal != null ? concFromCal.toFixed(2) : '—'}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 15, marginBottom: 8 }}>
+                  {concFromCal != null
+                    ? settings.unit.replace('mg/L', 'mg/l').replace('MG/L', 'mg/l')
+                    : 'No calibration active'}
+                </Text>
+              </View>
+            </View>
           </View>
 
           <View style={{ marginTop: spacing.md }}>
@@ -275,9 +291,9 @@ export default function Measure() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
               <Label>LED · Wavelength</Label>
-              {/* Change #5: Show dim color when off, bright when on */}
+              {/* Change #2: removed "· Off" text — just show wavelength name */}
               <Text style={{ color: ledOn ? wavelengthColor() : colors.textSecondary, marginTop: 4, fontFamily: 'monospace', fontSize: 16 }}>
-                {wavelengthLabel()}{ledOn ? '' : ' · Off'}
+                {wavelengthLabel()}
               </Text>
             </View>
             <TouchableOpacity
@@ -360,6 +376,44 @@ export default function Measure() {
           <Sub style={{ marginTop: 6 }}>A = log₁₀(I₀ / I). Measure blank first to set I₀.</Sub>
         </Card>
       </ScrollView>
+
+      {/* Change #9: Styled in-app modal replaces all Alert popups */}
+      <Modal visible={!!modalMsg} transparent animationType="fade" onRequestClose={() => setModalMsg(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg }}>
+          <View style={{
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 16,
+            padding: spacing.lg,
+            width: '100%',
+            maxWidth: 340,
+          }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 17, marginBottom: 8 }}>
+              {modalMsg?.title}
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: spacing.lg }}>
+              {modalMsg?.body}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {modalMsg?.onView && (
+                <TouchableOpacity
+                  onPress={() => { setModalMsg(null); modalMsg.onView?.(); }}
+                  style={{ flex: 1, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary, alignItems: 'center' }}
+                >
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>View</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={() => setModalMsg(null)}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
