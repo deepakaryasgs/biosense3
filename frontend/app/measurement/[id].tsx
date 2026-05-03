@@ -167,20 +167,40 @@ export default function MeasurementDetail() {
             <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
               <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16 }}>{m.sampleId}</Text>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                {mode === 'absorbance' ? 'Absorbance vs Time' : `Concentration vs Time (${settings.unit})`}
+                {mode === 'absorbance' ? 'Absorbance vs Time' : `Concentration vs Time`}
               </Text>
             </View>
-            <View style={{ alignItems: 'center' }}>
-              <Chart
-                testID="detail-chart"
-                width={screenW}
-                height={200}
-                data={mode === 'absorbance' ? absData : conData}
-                strokeColor={ledColor(m.wavelength, colors)}
-                xLabel="t (s)"
-                yLabel={mode === 'absorbance' ? 'A' : settings.unit}
-              />
+            {/* Change #8: Y-axis label vertical centered, X-axis label centered below */}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* Vertical Y-axis label */}
+              <View style={{ width: 20, height: 200, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{
+                  color: colors.textSecondary,
+                  fontSize: 10,
+                  letterSpacing: 0.5,
+                  transform: [{ rotate: '-90deg' }],
+                  width: 160,
+                  textAlign: 'center',
+                }}>
+                  {mode === 'absorbance' ? 'Absorbance (OD)' : `Concentration (${settings.unit.replace('mg/L','mg/l').replace('MG/L','mg/l')})`}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Chart
+                  testID="detail-chart"
+                  width={screenW - 20}
+                  height={200}
+                  data={mode === 'absorbance' ? absData : conData}
+                  strokeColor={ledColor(m.wavelength, colors)}
+                  xLabel=""
+                  yLabel=""
+                />
+              </View>
             </View>
+            {/* X-axis label centered */}
+            <Text style={{ color: colors.textSecondary, fontSize: 10, letterSpacing: 0.5, textAlign: 'center', marginTop: 4 }}>
+              Time (sec)
+            </Text>
           </ViewShot>
         </Card>
 
