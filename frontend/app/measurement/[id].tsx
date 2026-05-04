@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Dimensions, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, Dimensions, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -12,13 +12,21 @@ import { Card, Label, Title, Sub, Badge } from '../../src/components';
 import { Chart } from '../../src/Chart';
 import { spacing, radius } from '../../src/theme';
 
-// Change #6: resolve actual LED colour from wavelength string
 function ledColor(w: string, colors: any): string {
   const s = (w || '').toLowerCase();
   if (s.includes('red')) return colors.ledRed;
   if (s.includes('blue')) return colors.ledBlue;
   if (s.includes('green')) return colors.ledGreen;
   return colors.primary;
+}
+
+// Returns e.g. "535 nm (Green)" from wavelength string
+function wavelengthLabel(w: string): string {
+  const s = (w || '').toLowerCase();
+  if (s.includes('red')) return '635 nm (Red)';
+  if (s.includes('green')) return '535 nm (Green)';
+  if (s.includes('blue')) return '470 nm (Blue)';
+  return w;
 }
 
 export default function MeasurementDetail() {
@@ -28,6 +36,8 @@ export default function MeasurementDetail() {
   const { measurements, calibrations, settings, deleteMeasurement } = useStore();
   const m = measurements.find((x) => x.id === id);
   const [mode, setMode] = useState<'absorbance' | 'concentration'>('absorbance');
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [exportModal, setExportModal] = useState<{ title: string; body: string } | null>(null);
   const shotRef = useRef<ViewShot>(null);
 
   if (!m) {
@@ -42,25 +52,30 @@ export default function MeasurementDetail() {
 
   const cal = calibrations.find((c) => c.id === m.calibrationId);
   const screenW = Dimensions.get('window').width - spacing.md * 2 - spacing.lg * 2;
+  const unit = settings.unit.replace('mg/L', 'mg/l').replace('MG/L', 'mg/l');
 
   const absData = m.points.map((p) => ({ x: p.t, y: p.absorbance }));
-  const conData =
-    cal != null
-      ? m.points.map((p) => ({ x: p.t, y: invert(cal, p.absorbance) ?? 0 }))
-      : absData;
+  const conData = cal != null
+    ? m.points.map((p) => ({ x: p.t, y: invert(cal, p.absorbance) ?? 0 }))
+    : absData;
 
   const exportCSV = async () => {
-    const header = 'time_s,intensity,absorbance\n';
-    const rows = m.points.map((p) => `${p.t.toFixed(3)},${p.intensity.toFixed(2)},${p.absorbance.toFixed(5)}`).join('\n');
+    // CSV changes:
+    // - Remove Mean A and Mean I from meta header
+    // - Remove separate Concentration line from meta
+    // - Add concentration as a column in the data table next to absorbance
+    // - Wavelength shows "635 nm (Red)" format
+    const header = 'time_s,intensity,absorbance,concentration\n';
+    const rows = m.points.map((p) => {
+      const conc = cal ? (invert(cal, p.absorbance) ?? '') : '';
+      return `${p.t.toFixed(3)},${p.intensity.toFixed(2)},${p.absorbance.toFixed(5)},${conc !== '' ? Number(conc).toFixed(3) : ''}`;
+    }).join('\n');
     const meta = [
       `# AquaSpec Measurement Report`,
       `# Sample ID: ${m.sampleId}`,
       `# Date: ${m.createdAt}`,
       `# Contaminant: ${m.contaminant}`,
-      `# Wavelength: ${m.wavelength}`,
-      `# Mean A: ${m.meanAbsorbance.toFixed(5)}`,
-      `# Mean I: ${m.meanIntensity.toFixed(2)}`,
-      `# Concentration: ${m.concentration != null ? `${m.concentration.toFixed(3)} ${settings.unit}` : 'N/A'}`,
+      `# Wavelength: ${wavelengthLabel(m.wavelength)}`,
       `# Status: ${m.status}`,
       `# Calibration: ${cal ? `${cal.name} (${cal.equation}, R²=${cal.r2.toFixed(4)})` : 'None'}`,
       `# Notes: ${m.notes.replace(/\n/g, ' ')}`,
@@ -83,17 +98,17 @@ export default function MeasurementDetail() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Share CSV' });
       } else {
-        Alert.alert('Saved', path);
+        setExportModal({ title: 'Saved', body: path });
       }
     } catch (e: any) {
-      Alert.alert('Export failed', e?.message || String(e));
+      setExportModal({ title: 'Export Failed', body: e?.message || String(e) });
     }
   };
 
   const exportPNG = async () => {
     try {
       if (!shotRef.current || !shotRef.current.capture) {
-        Alert.alert('Not supported', 'PNG export requires a native build.');
+        setExportModal({ title: 'Not Supported', body: 'PNG export requires a native build.' });
         return;
       }
       const uri = await shotRef.current.capture();
@@ -107,10 +122,10 @@ export default function MeasurementDetail() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share graph' });
       } else {
-        Alert.alert('Saved', uri);
+        setExportModal({ title: 'Saved', body: uri });
       }
     } catch (e: any) {
-      Alert.alert('Export failed', e?.message || String(e));
+      setExportModal({ title: 'Export Failed', body: e?.message || String(e) });
     }
   };
 
@@ -124,83 +139,57 @@ export default function MeasurementDetail() {
           <Badge
             label={m.status}
             color={
-              m.status === 'safe'
-                ? colors.safe
-                : m.status === 'warning'
-                ? colors.warning
-                : m.status === 'critical'
-                ? colors.critical
-                : colors.textSecondary
+              m.status === 'safe' ? colors.safe
+              : m.status === 'warning' ? colors.warning
+              : m.status === 'critical' ? colors.critical
+              : colors.textSecondary
             }
           />
-          {/* Change #6: Wavelength badge shown in its actual LED colour */}
-          <Badge label={m.wavelength} color={ledColor(m.wavelength, colors)} />
+          {/* Wavelength badge in its LED colour, showing nm + color name */}
+          <Badge label={wavelengthLabel(m.wavelength)} color={ledColor(m.wavelength, colors)} />
         </View>
 
+        {/* Results card — 3 metric boxes REMOVED, show key values as clean rows instead */}
         <Card style={{ marginTop: spacing.md }}>
           <Label>Results</Label>
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-            <Metric testID="metric-mean-absorbance" label="Mean A" value={m.meanAbsorbance.toFixed(3)} />
-            <Metric testID="metric-mean-intensity" label="Mean I" value={m.meanIntensity.toFixed(0)} />
-            <Metric
-              testID="metric-concentration"
-              label={`Conc (${settings.unit})`}
-              value={m.concentration != null ? m.concentration.toFixed(2) : '—'}
-            />
+          <View style={{ marginTop: 10, gap: 8 }}>
+            <ResultRow label="Absorbance (OD)" value={m.meanAbsorbance.toFixed(4)} />
+            {m.concentration != null && (
+              <ResultRow label={`Concentration`} value={`${m.concentration.toFixed(2)} ${unit}`} highlight />
+            )}
+            <ResultRow label="Intensity" value={m.meanIntensity.toFixed(0)} />
+            <ResultRow label="Duration" value={`${m.points[m.points.length - 1]?.t.toFixed(1) ?? '—'} sec`} />
           </View>
         </Card>
 
+        {/* Graph */}
         <Card style={{ marginTop: spacing.md }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Label>Graph</Label>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               <ChipBtn active={mode === 'absorbance'} label="Absorbance" onPress={() => setMode('absorbance')} testID="graph-mode-abs" />
-              <ChipBtn
-                active={mode === 'concentration'}
-                label="Concentration"
-                onPress={() => setMode('concentration')}
-                testID="graph-mode-conc"
-              />
+              <ChipBtn active={mode === 'concentration'} label="Concentration" onPress={() => setMode('concentration')} testID="graph-mode-conc" />
             </View>
           </View>
           <ViewShot ref={shotRef} options={{ format: 'png', quality: 1 }} style={{ backgroundColor: colors.surface, marginTop: 10, padding: spacing.md }}>
             <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
               <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16 }}>{m.sampleId}</Text>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                {mode === 'absorbance' ? 'Absorbance vs Time' : `Concentration vs Time`}
+                {mode === 'absorbance' ? 'Absorbance vs Time' : `Concentration vs Time (${unit})`}
               </Text>
             </View>
-            {/* Change #8: Y-axis label vertical centered, X-axis label centered below */}
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {/* Vertical Y-axis label */}
-              <View style={{ width: 20, height: 200, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{
-                  color: colors.textSecondary,
-                  fontSize: 10,
-                  letterSpacing: 0.5,
-                  transform: [{ rotate: '-90deg' }],
-                  width: 160,
-                  textAlign: 'center',
-                }}>
-                  {mode === 'absorbance' ? 'Absorbance (OD)' : `Concentration (${settings.unit.replace('mg/L','mg/l').replace('MG/L','mg/l')})`}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Chart
-                  testID="detail-chart"
-                  width={screenW - 20}
-                  height={200}
-                  data={mode === 'absorbance' ? absData : conData}
-                  strokeColor={ledColor(m.wavelength, colors)}
-                  xLabel=""
-                  yLabel=""
-                />
-              </View>
+            <View style={{ alignItems: 'center' }}>
+              {/* Undo #8: restore original simple axis labels, but lowercase mg/l */}
+              <Chart
+                testID="detail-chart"
+                width={screenW}
+                height={200}
+                data={mode === 'absorbance' ? absData : conData}
+                strokeColor={ledColor(m.wavelength, colors)}
+                xLabel="t (s)"
+                yLabel={mode === 'absorbance' ? 'A' : unit}
+              />
             </View>
-            {/* X-axis label centered */}
-            <Text style={{ color: colors.textSecondary, fontSize: 10, letterSpacing: 0.5, textAlign: 'center', marginTop: 4 }}>
-              Time (sec)
-            </Text>
           </ViewShot>
         </Card>
 
@@ -224,13 +213,7 @@ export default function MeasurementDetail() {
           <TouchableOpacity
             testID="export-csv-btn"
             onPress={exportCSV}
-            style={{
-              flex: 1,
-              paddingVertical: 14,
-              backgroundColor: colors.primary,
-              borderRadius: radius.md,
-              alignItems: 'center',
-            }}
+            style={{ flex: 1, paddingVertical: 14, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' }}
           >
             <MaterialCommunityIcons name="file-delimited-outline" size={20} color="#fff" />
             <Text style={{ color: '#fff', fontWeight: '700', marginTop: 4 }}>Export CSV</Text>
@@ -238,14 +221,7 @@ export default function MeasurementDetail() {
           <TouchableOpacity
             testID="export-png-btn"
             onPress={exportPNG}
-            style={{
-              flex: 1,
-              paddingVertical: 14,
-              borderWidth: 1,
-              borderColor: colors.primary,
-              borderRadius: radius.md,
-              alignItems: 'center',
-            }}
+            style={{ flex: 1, paddingVertical: 14, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, alignItems: 'center' }}
           >
             <MaterialCommunityIcons name="image-outline" size={20} color={colors.primary} />
             <Text style={{ color: colors.primary, fontWeight: '700', marginTop: 4 }}>Share PNG</Text>
@@ -254,31 +230,54 @@ export default function MeasurementDetail() {
 
         <TouchableOpacity
           testID="delete-measurement-btn"
-          onPress={() =>
-            Alert.alert('Delete?', m.sampleId, [
-              { text: 'Cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  await deleteMeasurement(m.id);
-                  router.back();
-                },
-              },
-            ])
-          }
-          style={{
-            marginTop: spacing.md,
-            padding: 14,
-            borderRadius: radius.md,
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: colors.critical,
-          }}
+          onPress={() => setDeleteModal(true)}
+          style={{ marginTop: spacing.md, padding: 14, borderRadius: radius.md, alignItems: 'center', borderWidth: 1, borderColor: colors.critical }}
         >
           <Text style={{ color: colors.critical, fontWeight: '700' }}>Delete Measurement</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Styled delete confirmation modal */}
+      <Modal visible={deleteModal} transparent animationType="fade" onRequestClose={() => setDeleteModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg }}>
+          <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: spacing.lg, width: '100%', maxWidth: 340 }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 17, marginBottom: 8 }}>Delete Measurement?</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: spacing.lg }}>
+              "{m.sampleId}" will be permanently removed.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setDeleteModal(false)}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
+              >
+                <Text style={{ color: colors.textSecondary, fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => { setDeleteModal(false); await deleteMeasurement(m.id); router.back(); }}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: radius.md, backgroundColor: colors.critical, alignItems: 'center' }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Export info/error modal */}
+      <Modal visible={!!exportModal} transparent animationType="fade" onRequestClose={() => setExportModal(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg }}>
+          <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: spacing.lg, width: '100%', maxWidth: 340 }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 17, marginBottom: 8 }}>{exportModal?.title}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: spacing.lg }}>{exportModal?.body}</Text>
+            <TouchableOpacity
+              onPress={() => setExportModal(null)}
+              style={{ paddingVertical: 12, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -312,21 +311,14 @@ function invert(cal: any, absorbance: number): number | null {
   return (lo + hi) / 2;
 }
 
-function Metric({ label, value, testID }: { label: string; value: string; testID?: string }) {
+function ResultRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   const { colors } = useTheme();
   return (
-    <View
-      style={{
-        flex: 1,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: radius.md,
-        padding: spacing.md,
-        backgroundColor: colors.surfaceElevated,
-      }}
-    >
-      <Text style={{ color: colors.textSecondary, fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase' }}>{label}</Text>
-      <Text style={{ color: colors.textPrimary, fontFamily: 'monospace', fontSize: 18, marginTop: 4 }}>{value}</Text>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+      <Text style={{ color: colors.textSecondary, fontSize: 13, letterSpacing: 0.3 }}>{label}</Text>
+      <Text style={{ color: highlight ? colors.primary : colors.textPrimary, fontFamily: 'monospace', fontSize: 15, fontWeight: highlight ? '700' : '400' }}>
+        {value}
+      </Text>
     </View>
   );
 }
